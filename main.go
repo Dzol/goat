@@ -6,17 +6,65 @@ import "strings"
 import "log"
 import "time"
 
-var key = ""
-
 type weatherProvider interface {
     temperature(city string) (float64, error)
 }
 
-type openWeatherMap struct {}
+type openWeatherMap struct {
+	key string
+}
+
+func (w openWeatherMap) temperature(city string) (float64, error) {
+	resp, err := http.Get("http://api.openweathermap.org/data/2.5/weather?APPID=" + w.key + "&q=" + city)
+	if err != nil {
+		return 0, err
+	}
+
+	defer resp.Body.Close()
+
+	var d struct {
+		Main struct {
+			Kelvin float64 `json:"temp"`
+		} `json:"main"`
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(&d); err != nil {
+		return 0, err
+	}
+
+	log.Printf("openWeatherMap: %s @ %.2f", city, d.Main.Kelvin)
+	return d.Main.Kelvin, nil
+}
 
 type weatherUnderground struct {
 	key string
 }
+
+func (w weatherUnderground) temperature(city string) (float64, error) {
+    resp, err := http.Get("http://api.wunderground.com/api/" + w.key + "/conditions/q/" + city + ".json")
+    if err != nil {
+        return 0, err
+    }
+
+    defer resp.Body.Close()
+
+    var d struct {
+        Observation struct {
+            Celsius float64 `json:"temp_c"`
+        } `json:"current_observation"`
+    }
+
+    if err := json.NewDecoder(resp.Body).Decode(&d); err != nil {
+        return 0, err
+    }
+
+    kelvin := d.Observation.Celsius + 273.15
+    log.Printf("weatherUnderground: %s @ %.2f", city, kelvin)
+    return kelvin, nil
+}
+
+var owm = openWeatherMap{key: ""}
+var wu = weatherUnderground{key: ""}
 
 func main() {
 	http.HandleFunc("/greet", greet)
@@ -24,7 +72,7 @@ func main() {
 		begin := time.Now()
 		city := strings.SplitN(r.URL.Path, "/", 3)[2]
 
-		temp, err := temperature(city, openWeatherMap{}, weatherUnderground{key: ""})
+		temp, err := temperature(city, owm, wu)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -58,49 +106,4 @@ func temperature(city string, providers ...weatherProvider) (float64, error) {
     }
 
     return sum / float64(len(providers)), nil
-}
-
-func (w openWeatherMap) temperature(city string) (float64, error) {
-	resp, err := http.Get("http://api.openweathermap.org/data/2.5/weather?APPID=" + key + "&q=" + city)
-	if err != nil {
-		return 0, err
-	}
-
-	defer resp.Body.Close()
-
-	var d struct {
-		Main struct {
-			Kelvin float64 `json:"temp"`
-		} `json:"main"`
-	}
-
-	if err := json.NewDecoder(resp.Body).Decode(&d); err != nil {
-		return 0, err
-	}
-
-	log.Printf("openWeatherMap: %s @ %.2f", city, d.Main.Kelvin)
-	return d.Main.Kelvin, nil
-}
-
-func (w weatherUnderground) temperature(city string) (float64, error) {
-    resp, err := http.Get("http://api.wunderground.com/api/" + w.key + "/conditions/q/" + city + ".json")
-    if err != nil {
-        return 0, err
-    }
-
-    defer resp.Body.Close()
-
-    var d struct {
-        Observation struct {
-            Celsius float64 `json:"temp_c"`
-        } `json:"current_observation"`
-    }
-
-    if err := json.NewDecoder(resp.Body).Decode(&d); err != nil {
-        return 0, err
-    }
-
-    kelvin := d.Observation.Celsius + 273.15
-    log.Printf("weatherUnderground: %s: %.2f", city, kelvin)
-    return kelvin, nil
 }
