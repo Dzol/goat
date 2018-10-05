@@ -5,6 +5,7 @@ import "encoding/json"
 import "strings"
 import "log"
 import "time"
+import "fmt"
 
 type weatherProvider interface {
     temperature(city string) (float64, error)
@@ -94,16 +95,23 @@ func greet(w http.ResponseWriter, r *http.Request) {
 }
 
 func temperature(city string, providers ...weatherProvider) (float64, error) {
-    sum := 0.0
+	sum := 0.0
+	c := make(chan float64, 2)
 
-    for _, provider := range providers {
-        k, err := provider.temperature(city)
-        if err != nil {
-            return 0, err
-        }
+	for _, provider := range providers {
+		go func(p weatherProvider) {
+			k, err := p.temperature(city)
+			if err != nil {
+				fmt.Println(err)
+			}
+			c <- k
+		}(provider)
+	}
 
-        sum += k
-    }
+	for i := 0; i < len(providers); i++ {
+		k := <-c
+		sum += k
+	}
 
-    return sum / float64(len(providers)), nil
+	return sum / float64(len(providers)), nil
 }
